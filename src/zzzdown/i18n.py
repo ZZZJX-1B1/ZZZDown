@@ -7,6 +7,7 @@ TEXT = {
         "urls": "粘贴视频、合集或创作者主页链接（每行一个）",
         "start": "开始下载",
         "stop": "停止",
+        "force_redownload": "重新下载/升级画质（忽略历史记录）",
         "browser": "登录浏览器",
         "browser_none": "无登录下载",
         "location": "视频库位置",
@@ -36,6 +37,7 @@ TEXT = {
         "urls": "Paste video, playlist, or creator URLs (one per line)",
         "start": "Start Download",
         "stop": "Stop",
+        "force_redownload": "Re-download / upgrade quality (ignore history)",
         "browser": "Signed-in browser",
         "browser_none": "Download without login",
         "location": "Library location",
@@ -63,4 +65,3 @@ TEXT = {
 def translator(language: str):
     table = TEXT.get(language, TEXT["en_US"])
     return lambda key: table.get(key, key)
-

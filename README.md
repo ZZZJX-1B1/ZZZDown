@@ -12,6 +12,7 @@ ZZZDown 是一款支持简体中文和英文的 macOS、Windows 桌面视频下�
 - Bilibili, YouTube, Douyin, TikTok, Xinpianchang, and other yt-dlp-supported sites
 - Up to 4K, resumable downloads, subtitles, metadata, and thumbnails / 最高 4K、断点续传、字幕、元数据及封面
 - Chrome, Edge, Firefox, or no-login mode / 支持 Chrome、Edge、Firefox及无登录模式
+- One-task re-download/quality-upgrade switch that safely ignores old archive entries / 可对当前任务忽略旧下载记录并重新下载、升级画质
 - Search, nested virtual folders, duplicate cleanup, recycle bin, restore, and file reveal
 - 搜索、多级虚拟分类、重复清理、回收站、还原及文件定位
 - Import an existing ZZZDown-compatible library / 导入现有兼容视频库
@@ -68,4 +69,3 @@ Only download content that you are authorized to save. You are responsible for c
 ## License
 
 MIT
-

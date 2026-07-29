@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from zzzdown.engine import friendly_error, import_library, parse_urls, safe_name, task_type
+from zzzdown.engine import friendly_error, history_args, import_library, parse_urls, safe_name, task_type
 from zzzdown.indexer import build_library_html, generate_global
 
 
@@ -27,6 +27,13 @@ class CoreTests(unittest.TestCase):
         self.assertIn("完全退出 Chrome", message)
         self.assertIn("Fully quit Chrome", message)
         self.assertNotIn("ERROR: ERROR:", message)
+
+    def test_force_redownload_ignores_archive_and_overwrites(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = history_args(Path(directory), True)
+            self.assertEqual(args, ["--force-overwrites"])
+            normal = history_args(Path(directory), False)
+            self.assertEqual(normal[0], "--download-archive")
 
     def test_import_and_generate_empty_library(self):
         with tempfile.TemporaryDirectory() as directory:

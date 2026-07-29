@@ -59,9 +59,12 @@ class MainWindow:
         buttons.pack(fill="x", pady=12)
         self.start_button = ttk.Button(buttons, command=self.start_download)
         self.stop_button = ttk.Button(buttons, command=self.stop_download, state="disabled")
+        self.force_var = tk.BooleanVar(value=False)
+        self.force_check = ttk.Checkbutton(buttons, variable=self.force_var)
         self.library_button = ttk.Button(buttons, command=self.open_library)
         self.start_button.pack(side="left")
         self.stop_button.pack(side="left", padx=8)
+        self.force_check.pack(side="left", padx=(8, 0))
         self.library_button.pack(side="right")
         self.status_var = tk.StringVar()
         ttk.Label(self.download_page, textvariable=self.status_var).pack(anchor="w", pady=(0, 8))
@@ -123,6 +126,7 @@ class MainWindow:
         self.url_label.configure(text=self.t("urls"))
         self.start_button.configure(text=self.t("start"))
         self.stop_button.configure(text=self.t("stop"))
+        self.force_check.configure(text=self.t("force_redownload"))
         self.library_button.configure(text=self.t("library"))
         self.status_var.set(self.t("idle"))
         self.browser_label.configure(text=self.t("browser"))
@@ -178,6 +182,7 @@ class MainWindow:
                 elif kind == "download_done":
                     self.start_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
+                    self.force_var.set(False)
                     self.status_var.set(self.t("failed") if payload else self.t("done"))
                 elif kind == "utility_done":
                     button, error, success = payload
@@ -199,7 +204,11 @@ class MainWindow:
         self.status_var.set(self.t("running"))
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
-        self.engine = DownloadEngine(self.settings, lambda line: self.events.put(("log", line)))
+        self.engine = DownloadEngine(
+            self.settings,
+            lambda line: self.events.put(("log", line)),
+            force_redownload=self.force_var.get(),
+        )
         threading.Thread(target=self._download_worker, args=(urls,), daemon=True).start()
 
     def _download_worker(self, urls: list[str]) -> None:

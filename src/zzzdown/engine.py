@@ -65,6 +65,12 @@ def browser_args(settings: Settings) -> list[str]:
     return args
 
 
+def history_args(task_dir: Path, force_redownload: bool) -> list[str]:
+    if force_redownload:
+        return ["--force-overwrites"]
+    return ["--download-archive", str(task_dir / ".download-archive-4k-v1.txt")]
+
+
 def task_type(url: str, data: dict) -> str:
     lowered = url.lower()
     if "space.bilibili.com" in lowered or re.search(r"(?:youtube|tiktok)\.com/@", lowered) or "douyin.com/user" in lowered or re.search(r"xinpianchang\.com/u\d+", lowered):
@@ -88,9 +94,10 @@ def task_identity(data: dict, url: str) -> tuple[str, str]:
 
 
 class DownloadEngine:
-    def __init__(self, settings: Settings, log=lambda _message: None):
+    def __init__(self, settings: Settings, log=lambda _message: None, force_redownload: bool = False):
         self.settings = settings
         self.log = log
+        self.force_redownload = force_redownload
         self.process: subprocess.Popen | None = None
 
     @property
@@ -154,6 +161,10 @@ class DownloadEngine:
         ffmpeg = ffmpeg_path()
         for number, url in enumerate(urls, 1):
             self.log(f"[{number}/{len(urls)}] {url}")
+            cookie_source = self.settings.browser if self.settings.browser != "none" else "none"
+            self.log(f"Cookies: {cookie_source}")
+            if self.force_redownload:
+                self.log("Re-download/quality upgrade: enabled")
             try:
                 data = self._metadata(url)
                 source, title = task_identity(data, url)
@@ -163,7 +174,7 @@ class DownloadEngine:
                 command = [
                     *ytdlp_command(), *browser_args(self.settings),
                     "--ffmpeg-location", ffmpeg,
-                    "--download-archive", str(task_dir / ".download-archive-4k-v1.txt"),
+                    *history_args(task_dir, self.force_redownload),
                     "--continue", "--ignore-errors", "--retries", "10", "--fragment-retries", "10",
                     "--concurrent-fragments", "4", "--sleep-requests", "1",
                     "--format", "bv*[height<=2160]+ba/b[height<=2160]/b",
