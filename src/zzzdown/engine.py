@@ -16,6 +16,26 @@ from .tools import ffmpeg_path, ytdlp_command
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
+COOKIE_DATABASE_ERRORS = (
+    "could not copy chrome cookie database",
+    "permission denied",  # yt-dlp #7271 when Chromium keeps the SQLite file locked
+)
+
+
+def friendly_error(message: str) -> str:
+    """Turn common downloader failures into one concise, actionable message."""
+    cleaned = str(message or "").strip()
+    while cleaned.lower().startswith("error:"):
+        cleaned = cleaned[6:].strip()
+    lowered = cleaned.lower()
+    if "cookie" in lowered and any(marker in lowered for marker in COOKIE_DATABASE_ERRORS):
+        return (
+            "Chrome 正在占用登录 Cookies 数据库。请完全退出 Chrome（包括后台进程）后重试；"
+            "或在设置中切换到已登录哔哩哔哩的 Edge/Firefox。 / "
+            "Chrome is locking its cookie database. Fully quit Chrome, including background processes, "
+            "then retry; or select a signed-in Edge/Firefox profile in Settings."
+        )
+    return cleaned or "Unknown downloader error"
 
 
 def parse_urls(text: str) -> list[str]:
@@ -90,8 +110,10 @@ class DownloadEngine:
         ]
         result = self._run(command, capture=True)
         if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip().splitlines()
-            raise RuntimeError(detail[-1] if detail else "Unable to read video metadata")
+            output = (result.stderr or result.stdout).strip()
+            detail = output.splitlines()
+            candidate = output if "cookie" in output.lower() else (detail[-1] if detail else "Unable to read video metadata")
+            raise RuntimeError(friendly_error(candidate))
         return json.loads(result.stdout)
 
     def _task_dir(self, source: str, title: str, url: str) -> Path:
@@ -119,7 +141,10 @@ class DownloadEngine:
         )
         assert self.process.stdout is not None
         for line in self.process.stdout:
-            self.log(line.rstrip())
+            rendered = line.rstrip()
+            if rendered.lower().startswith("error:"):
+                rendered = f"ERROR: {friendly_error(rendered)}"
+            self.log(rendered)
         status = self.process.wait()
         self.process = None
         return status
@@ -156,7 +181,7 @@ class DownloadEngine:
                     failures += 1
             except Exception as exc:
                 failures += 1
-                self.log(f"ERROR: {exc}")
+                self.log(f"ERROR: {friendly_error(str(exc))}")
         generate_global(self.library, self.library)
         return failures
 

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from zzzdown.engine import import_library, parse_urls, safe_name, task_type
+from zzzdown.engine import friendly_error, import_library, parse_urls, safe_name, task_type
 from zzzdown.indexer import build_library_html, generate_global
 
 
@@ -21,6 +21,12 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(task_type("https://space.bilibili.com/123/video", {}), "creator")
         self.assertEqual(task_type("https://youtube.com/playlist?list=abc", {}), "playlist")
         self.assertEqual(task_type("https://youtube.com/watch?v=abc", {}), "single")
+
+    def test_chrome_cookie_lock_error_is_actionable_and_not_duplicated(self):
+        message = friendly_error("ERROR: ERROR: Could not copy Chrome cookie database")
+        self.assertIn("完全退出 Chrome", message)
+        self.assertIn("Fully quit Chrome", message)
+        self.assertNotIn("ERROR: ERROR:", message)
 
     def test_import_and_generate_empty_library(self):
         with tempfile.TemporaryDirectory() as directory:
