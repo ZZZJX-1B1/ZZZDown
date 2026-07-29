@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "ZZZDown contributors"}]
 dependencies = [
+  "PySide6-Essentials>=6.8,<7",
   "platformdirs>=4.2",
   "yt-dlp[default]>=2025.1.1",
   "imageio-ffmpeg>=0.5",

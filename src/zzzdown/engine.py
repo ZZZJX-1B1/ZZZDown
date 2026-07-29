@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -46,6 +47,30 @@ def parse_urls(text: str) -> list[str]:
             seen.add(url)
             found.append(url)
     return found
+
+
+def parse_progress_line(line: str) -> dict[str, str | float] | None:
+    """Parse the stable progress record emitted by the yt-dlp command."""
+    marker = "[zzzdown-progress] "
+    if not line.startswith(marker):
+        return None
+    fields = [field.strip() for field in line[len(marker):].split("|", 6)]
+    if len(fields) != 7:
+        return None
+    try:
+        percent = float(fields[0].replace("%", "").strip())
+    except ValueError:
+        return None
+    cleaned = ["—" if value in {"", "NA", "N/A", "None"} else value for value in fields[1:]]
+    return {
+        "percent": max(0.0, min(100.0, percent)),
+        "downloaded": cleaned[0],
+        "total": cleaned[1],
+        "speed": cleaned[2],
+        "eta": cleaned[3],
+        "resolution": cleaned[4],
+        "format": cleaned[5].upper() if cleaned[5] != "—" else "—",
+    }
 
 
 def safe_name(value: str, fallback: str = "Untitled") -> str:
@@ -99,6 +124,11 @@ class DownloadEngine:
         self.log = log
         self.force_redownload = force_redownload
         self.process: subprocess.Popen | None = None
+        self._cancelled = threading.Event()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled.is_set()
 
     @property
     def library(self) -> Path:
@@ -160,6 +190,8 @@ class DownloadEngine:
         failures = 0
         ffmpeg = ffmpeg_path()
         for number, url in enumerate(urls, 1):
+            if self.cancelled:
+                break
             self.log(f"[{number}/{len(urls)}] {url}")
             cookie_source = self.settings.browser if self.settings.browser != "none" else "none"
             self.log(f"Cookies: {cookie_source}")
@@ -167,6 +199,8 @@ class DownloadEngine:
                 self.log("Re-download/quality upgrade: enabled")
             try:
                 data = self._metadata(url)
+                if self.cancelled:
+                    break
                 source, title = task_identity(data, url)
                 kind = task_type(url, data)
                 task_dir = self._task_dir(source, title, url)
@@ -177,6 +211,9 @@ class DownloadEngine:
                     *history_args(task_dir, self.force_redownload),
                     "--continue", "--ignore-errors", "--retries", "10", "--fragment-retries", "10",
                     "--concurrent-fragments", "4", "--sleep-requests", "1",
+                    "--newline", "--no-colors",
+                    "--progress-template",
+                    "download:[zzzdown-progress] %(progress._percent_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(info.resolution)s|%(info.ext)s",
                     "--format", "bv*[height<=2160]+ba/b[height<=2160]/b",
                     "--format-sort", "res:2160,vcodec:h264,fps,hdr:12,quality,br",
                     "--merge-output-format", "mp4", "--remux-video", "mp4",
@@ -188,15 +225,20 @@ class DownloadEngine:
                     "--output", "%(upload_date>%Y-%m-%d,release_date>%Y-%m-%d|Unknown)s_%(title).160B [%(id)s].%(ext)s",
                     url,
                 ]
-                if self._stream(command) != 0:
+                if self._stream(command) != 0 and not self.cancelled:
                     failures += 1
+                if self.cancelled:
+                    break
             except Exception as exc:
+                if self.cancelled:
+                    break
                 failures += 1
                 self.log(f"ERROR: {friendly_error(str(exc))}")
         generate_global(self.library, self.library)
         return failures
 
     def cancel(self) -> None:
+        self._cancelled.set()
         if self.process and self.process.poll() is None:
             self.process.terminate()
 
