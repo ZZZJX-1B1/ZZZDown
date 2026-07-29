@@ -1,10 +1,13 @@
 TEXT = {
     "zh_CN": {
         "title": "ZZZDown · 通用视频下载器",
+        "tagline": "下载高画质视频，并在本地视频库中统一管理",
         "download": "下载",
         "library": "打开全局视频库",
         "settings": "设置",
         "urls": "粘贴视频、合集或创作者主页链接（每行一个）",
+        "url_hint": "支持哔哩哔哩、YouTube、抖音、TikTok 和新片场",
+        "activity": "下载进度",
         "start": "开始下载",
         "stop": "停止",
         "force_redownload": "重新下载/升级画质（忽略历史记录）",
@@ -31,10 +34,13 @@ TEXT = {
     },
     "en_US": {
         "title": "ZZZDown · Universal Video Downloader",
+        "tagline": "Download high-quality video and keep everything organized in your local library",
         "download": "Download",
         "library": "Open Global Library",
         "settings": "Settings",
         "urls": "Paste video, playlist, or creator URLs (one per line)",
+        "url_hint": "Supports Bilibili, YouTube, Douyin, TikTok, and Xinpianchang",
+        "activity": "Download activity",
         "start": "Start Download",
         "stop": "Stop",
         "force_redownload": "Re-download / upgrade quality (ignore history)",
