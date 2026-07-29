@@ -1,5 +1,7 @@
 #define MyAppName "ZZZDown"
-#define MyAppVersion "0.1.0"
+#ifndef MyAppVersion
+#define MyAppVersion "0.1.3"
+#endif
 #define MyAppExeName "ZZZDown.exe"
 
 [Setup]
@@ -30,4 +32,3 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch ZZZDown"; Flags: nowait postinstall skipifsilent
-

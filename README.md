@@ -22,11 +22,16 @@ ZZZDown 是一款支持简体中文和英文的 macOS、Windows 桌面视频下�
 
 Download the installer for your platform from GitHub Releases:
 
-- `ZZZDown-macOS-apple-silicon.dmg`
-- `ZZZDown-macOS-intel.dmg`
-- `ZZZDown-Windows-Setup.exe`
+- `ZZZDown-vX.Y.Z-macOS-Apple-Silicon.dmg`
+- `ZZZDown-vX.Y.Z-macOS-Apple-Silicon-portable.zip`
+- `ZZZDown-vX.Y.Z-Windows-x64-Setup.exe`
+- `ZZZDown-vX.Y.Z-Windows-x64-portable.zip`
 
 下载 GitHub Releases 中与电脑匹配的安装包即可。
+
+macOS builds support Apple Silicon. Portable ZIP archives can be extracted and run without an installer.
+
+macOS 版本支持 Apple Silicon；便携版 ZIP 解压后无需安装即可运行。
 
 The public builds are not code-signed. On macOS, Control-click the app and choose **Open** the first time. On Windows, choose **More info → Run anyway** if SmartScreen appears.
 

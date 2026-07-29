@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -7,6 +8,7 @@ datas = [(str(root / "src" / "zzzdown" / "resources"), "zzzdown/resources")]
 datas += collect_data_files("certifi")
 hiddenimports = collect_submodules("curl_cffi") + collect_submodules("yt_dlp") + collect_submodules("PySide6")
 icon = root / "src" / "zzzdown" / "resources" / ("ZZZDown.icns" if __import__("sys").platform == "darwin" else "ZZZDown.ico")
+version = os.environ.get("APP_VERSION", "0.1.3")
 
 a = Analysis(
     [str(root / "launcher.py")],
@@ -32,5 +34,11 @@ if __import__("sys").platform == "darwin":
     app = BUNDLE(
         coll, name="ZZZDown.app", icon=str(icon) if icon.exists() else None,
         bundle_identifier="com.zzzdown.app",
-        info_plist={"CFBundleDisplayName": "ZZZDown", "NSHighResolutionCapable": True},
+        info_plist={
+            "CFBundleDisplayName": "ZZZDown",
+            "CFBundleShortVersionString": version,
+            "CFBundleVersion": version,
+            "LSMinimumSystemVersion": "13.0",
+            "NSHighResolutionCapable": True,
+        },
     )

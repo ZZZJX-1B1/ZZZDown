@@ -1,4 +1,8 @@
-name: Build installers
+name: Build and release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 on:
   workflow_dispatch:
@@ -6,25 +10,39 @@ on:
     tags: ["v*"]
 
 jobs:
-  macos:
-    strategy:
-      matrix:
-        include:
-          - runner: macos-15-intel
-            arch: intel
-          - runner: macos-14
-            arch: apple-silicon
-    runs-on: ${{ matrix.runner }}
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
-      - run: chmod +x scripts/build_macos.sh && scripts/build_macos.sh
-      - run: mv dist/ZZZDown-macOS.dmg dist/ZZZDown-macOS-${{ matrix.arch }}.dmg
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements-build.txt
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build Apple Silicon packages
+        env:
+          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.3' }}
+        run: chmod +x scripts/build_macos.sh && scripts/build_macos.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: ZZZDown-macOS-${{ matrix.arch }}
-          path: dist/*.dmg
+          name: ZZZDown-macOS-Apple-Silicon
+          path: |
+            dist/*-macOS-Apple-Silicon.dmg
+            dist/*-macOS-Apple-Silicon-portable.zip
+          if-no-files-found: error
 
   windows:
     runs-on: windows-latest
@@ -33,22 +51,40 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: choco install innosetup --no-progress -y
-      - shell: powershell
+      - name: Build Windows packages
+        shell: powershell
+        env:
+          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.3' }}
         run: scripts/build_windows.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: ZZZDown-Windows
-          path: dist/ZZZDown-Windows-Setup.exe
+          path: |
+            dist/*-Windows-x64-Setup.exe
+            dist/*-Windows-x64-portable.zip
+          if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [macos, windows]
+    needs: [test, macos, windows]
     runs-on: ubuntu-latest
-    permissions: {contents: write}
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: {path: artifacts, merge-multiple: true}
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Verify release assets
+        run: |
+          test "$(find artifacts -maxdepth 1 -type f | wc -l)" -eq 4
+          test -f "artifacts/ZZZDown-${GITHUB_REF_NAME}-macOS-Apple-Silicon.dmg"
+          test -f "artifacts/ZZZDown-${GITHUB_REF_NAME}-macOS-Apple-Silicon-portable.zip"
+          test -f "artifacts/ZZZDown-${GITHUB_REF_NAME}-Windows-x64-Setup.exe"
+          test -f "artifacts/ZZZDown-${GITHUB_REF_NAME}-Windows-x64-portable.zip"
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          generate_release_notes: true
+          body_path: .github/release-notes.md
+          fail_on_unmatched_files: true
