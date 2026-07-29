@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.tools/
+*.egg-info/
+build/
+dist/
+.pyinstaller-cache/
+*.spec.bak
+src/zzzdown/resources/bin/
+.DS_Store

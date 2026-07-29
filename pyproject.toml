@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zzzdown"
+version = "0.1.0"
+description = "Cross-platform universal video downloader and local video library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "ZZZDown contributors"}]
+dependencies = [
+  "platformdirs>=4.2",
+  "yt-dlp[default]>=2025.1.1",
+  "imageio-ffmpeg>=0.5",
+  "certifi>=2025.1.31",
+  "curl-cffi>=0.11",
+]
+
+[project.scripts]
+zzzdown = "zzzdown.app:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+zzzdown = ["resources/**/*"]
