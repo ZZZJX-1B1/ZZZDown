@@ -115,6 +115,8 @@ def load_items(root: Path, include_collection: bool = False) -> list[dict]:
         video = find_sibling(base, VIDEO_EXTENSIONS, video_id)
         if not video:
             continue
+        video_stat = video.stat()
+        downloaded_at = datetime.fromtimestamp(video_stat.st_mtime)
         image = find_sibling(base, IMAGE_EXTENSIONS, video_id)
         upload_date = str(data.get("upload_date") or "")
         title = str(data.get("title") or video.stem)
@@ -129,6 +131,28 @@ def load_items(root: Path, include_collection: bool = False) -> list[dict]:
             source_url = original
         platform = site_name(source_dir, original)
         kind = task_type(source_dir, source_url, data)
+        task_metadata = data.get("zzzdown") if isinstance(data.get("zzzdown"), dict) else {}
+        task_id = str(task_metadata.get("task_id") or f"legacy::{source_dir}/{task_name}")
+        try:
+            task_started_timestamp = int(task_metadata.get("started_at") or 0)
+        except (TypeError, ValueError):
+            task_started_timestamp = 0
+        try:
+            download_batch_index = max(1, int(task_metadata.get("batch_index") or 1))
+        except (TypeError, ValueError):
+            download_batch_index = 1
+        try:
+            download_item_index = max(
+                0,
+                int(
+                    task_metadata.get("item_index")
+                    or data.get("playlist_index")
+                    or data.get("playlist_autonumber")
+                    or 0
+                ),
+            )
+        except (TypeError, ValueError):
+            download_item_index = 0
         heights = [data.get("height")]
         heights.extend(
             item.get("height") for item in (data.get("requested_formats") or [])
@@ -140,11 +164,13 @@ def load_items(root: Path, include_collection: bool = False) -> list[dict]:
             "title": title,
             "date": display_date(upload_date),
             "sortDate": upload_date,
+            "downloadDate": downloaded_at.strftime("%Y-%m-%d"),
+            "downloadTimestamp": int(video_stat.st_mtime * 1000),
             "duration": format_duration(data.get("duration")),
             "id": video_id,
             "video": relative_url(video, root),
             "videoPath": video.relative_to(root).as_posix(),
-            "fileSize": video.stat().st_size,
+            "fileSize": video_stat.st_size,
             "height": height,
             "thumbnail": relative_url(image, root) if image else "",
             "original": original,
@@ -154,8 +180,20 @@ def load_items(root: Path, include_collection: bool = False) -> list[dict]:
             "taskType": kind,
             "task": task_name,
             "taskUrl": source_url,
+            "downloadTaskId": task_id,
+            "downloadTaskStartedTimestamp": task_started_timestamp,
+            "downloadBatchIndex": download_batch_index,
+            "downloadItemIndex": download_item_index,
             "duplicateKey": duplicate_key,
         })
+    task_started = {}
+    for item in items:
+        task_started[item["downloadTaskId"]] = max(
+            task_started.get(item["downloadTaskId"], 0),
+            item["downloadTaskStartedTimestamp"] or item["downloadTimestamp"],
+        )
+    for item in items:
+        item["downloadTaskStartedTimestamp"] = task_started[item["downloadTaskId"]]
     duplicate_counts = Counter(item["duplicateKey"] for item in items)
     for item in items:
         item["duplicateCount"] = duplicate_counts[item["duplicateKey"]]
@@ -421,7 +459,17 @@ ENGLISH_REPLACEMENTS = {
     "全部渠道": "All sources",
     "全部类型": "All types",
     "全部任务": "All tasks",
+    "下载日期": "Downloaded",
+    "发布时间排序": "Published date",
+    "下载任务顺序": "Download task order",
     "下载任务": "Download task",
+    "视频排序": "Video sorting",
+    "展开全部": "Show all",
+    "收起": "Collapse",
+    "全部日期": "All dates",
+    "第 8–15 天": "Days 8–15",
+    "第 16–30 天": "Days 16–30",
+    "更早": "Older",
     "任务类型": "Task type",
     "渠道": "Source",
 }

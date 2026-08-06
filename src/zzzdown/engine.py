@@ -4,10 +4,13 @@ import hashlib
 import json
 import os
 import re
+import secrets
+import signal
 import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -41,28 +44,31 @@ def friendly_error(message: str) -> str:
 
 def parse_urls(text: str) -> list[str]:
     found, seen = [], set()
-    for candidate in re.findall(r"https?://[^\s]+", text):
-        url = candidate.strip().rstrip(",，;；)]}")
+    # Treat surrounding titles and notes as prose, even when they touch the URL
+    # without a space (a common format when copying lists from Chinese apps).
+    pattern = r'''https?://[^\s，；。！？、（）【】《》“”‘’<>'"\(\)\[\]\{\}]+'''
+    for candidate in re.findall(pattern, text):
+        url = candidate.strip().rstrip(".,，;；:：!?！？)]}>'\"")
         if url not in seen:
             seen.add(url)
             found.append(url)
     return found
 
 
-def parse_progress_line(line: str) -> dict[str, str | float] | None:
+def parse_progress_line(line: str) -> dict[str, str | float | int] | None:
     """Parse the stable progress record emitted by the yt-dlp command."""
     marker = "[zzzdown-progress] "
     if not line.startswith(marker):
         return None
-    fields = [field.strip() for field in line[len(marker):].split("|", 6)]
-    if len(fields) != 7:
+    fields = [field.strip() for field in line[len(marker):].split("|", 11)]
+    if len(fields) < 7:
         return None
     try:
         percent = float(fields[0].replace("%", "").strip())
     except ValueError:
         return None
     cleaned = ["—" if value in {"", "NA", "N/A", "None"} else value for value in fields[1:]]
-    return {
+    result = {
         "percent": max(0.0, min(100.0, percent)),
         "downloaded": cleaned[0],
         "total": cleaned[1],
@@ -71,6 +77,67 @@ def parse_progress_line(line: str) -> dict[str, str | float] | None:
         "resolution": cleaned[4],
         "format": cleaned[5].upper() if cleaned[5] != "—" else "—",
     }
+    if len(fields) >= 12:
+        result.update({
+            "item_index": _positive_int(fields[7]),
+            "item_total": _optional_positive_int(fields[8]),
+            "video_id": _clean_field(fields[9]),
+            "video_url": _clean_field(fields[10]),
+            "video_title": _clean_field(fields[11]),
+        })
+    return result
+
+
+def _clean_field(value: str) -> str:
+    cleaned = str(value or "").strip()
+    return "" if cleaned in {"", "NA", "N/A", "None"} else cleaned
+
+
+def _positive_int(value: str) -> int:
+    try:
+        return max(1, int(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _optional_positive_int(value: str) -> int:
+    cleaned = _clean_field(value)
+    if not cleaned:
+        return 0
+    try:
+        return max(0, int(float(cleaned)))
+    except ValueError:
+        return 0
+
+
+def parse_item_line(line: str) -> dict[str, str | int] | None:
+    marker = "[zzzdown-item] "
+    if not line.startswith(marker):
+        return None
+    fields = line[len(marker):].split("|", 4)
+    if len(fields) != 5:
+        return None
+    return {
+        "item_index": _positive_int(fields[0]),
+        "item_total": _optional_positive_int(fields[1]),
+        "video_id": _clean_field(fields[2]),
+        "video_url": _clean_field(fields[3]),
+        "video_title": _clean_field(fields[4]),
+    }
+
+
+def parse_item_done_line(line: str) -> dict[str, str | int] | None:
+    marker = "[zzzdown-item-done] "
+    if not line.startswith(marker):
+        return None
+    return parse_item_line("[zzzdown-item] " + line[len(marker):])
+
+
+def aggregate_progress(item_index: int, item_total: int, item_percent: float) -> float:
+    total = max(1, int(item_total))
+    index = max(1, min(total, int(item_index)))
+    percent = max(0.0, min(100.0, float(item_percent)))
+    return ((index - 1) + percent / 100) / total * 100
 
 
 def safe_name(value: str, fallback: str = "Untitled") -> str:
@@ -125,10 +192,18 @@ class DownloadEngine:
         self.force_redownload = force_redownload
         self.process: subprocess.Popen | None = None
         self._cancelled = threading.Event()
+        self._paused = threading.Event()
+        self._pause_gate = threading.Event()
+        self._pause_gate.set()
+        self._process_lock = threading.Lock()
 
     @property
     def cancelled(self) -> bool:
         return self._cancelled.is_set()
+
+    @property
+    def paused(self) -> bool:
+        return self._paused.is_set()
 
     @property
     def library(self) -> Path:
@@ -136,14 +211,110 @@ class DownloadEngine:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    @staticmethod
+    def _process_options() -> dict:
+        if sys.platform == "win32":
+            return {"creationflags": subprocess.CREATE_NO_WINDOW}
+        return {"start_new_session": True}
+
+    def _set_process(self, process: subprocess.Popen) -> None:
+        with self._process_lock:
+            self.process = process
+        if self.paused:
+            self._suspend_process(process)
+
+    def _clear_process(self, process: subprocess.Popen) -> None:
+        with self._process_lock:
+            if self.process is process:
+                self.process = None
+
+    @staticmethod
+    def _windows_process_tree(process: subprocess.Popen) -> list:
+        import psutil
+
+        try:
+            root = psutil.Process(process.pid)
+            return [*root.children(recursive=True), root]
+        except psutil.Error:
+            return []
+
+    def _suspend_process(self, process: subprocess.Popen) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            if sys.platform == "win32":
+                for item in self._windows_process_tree(process):
+                    try:
+                        item.suspend()
+                    except Exception:
+                        pass
+            else:
+                os.killpg(os.getpgid(process.pid), signal.SIGSTOP)
+        except (OSError, ProcessLookupError):
+            pass
+
+    def _resume_process(self, process: subprocess.Popen) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            if sys.platform == "win32":
+                for item in reversed(self._windows_process_tree(process)):
+                    try:
+                        item.resume()
+                    except Exception:
+                        pass
+            else:
+                os.killpg(os.getpgid(process.pid), signal.SIGCONT)
+        except (OSError, ProcessLookupError):
+            pass
+
+    def _terminate_process(self, process: subprocess.Popen) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            if sys.platform == "win32":
+                for item in self._windows_process_tree(process):
+                    try:
+                        item.terminate()
+                    except Exception:
+                        pass
+            else:
+                group = os.getpgid(process.pid)
+                os.killpg(group, signal.SIGCONT)
+                os.killpg(group, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
+    def _wait_until_resumed(self) -> bool:
+        while self.paused and not self.cancelled:
+            self._pause_gate.wait(0.1)
+        return not self.cancelled
+
     def _run(self, command: list[str], capture: bool = False) -> subprocess.CompletedProcess:
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        return subprocess.run(command, text=True, capture_output=capture, errors="replace", creationflags=flags)
+        if not self._wait_until_resumed():
+            return subprocess.CompletedProcess(command, -1, "", "")
+        process = subprocess.Popen(
+            command,
+            text=True,
+            stdout=subprocess.PIPE if capture else None,
+            stderr=subprocess.PIPE if capture else None,
+            errors="replace",
+            **self._process_options(),
+        )
+        self._set_process(process)
+        try:
+            stdout, stderr = process.communicate()
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        finally:
+            self._clear_process(process)
 
     def _metadata(self, url: str) -> dict:
         command = [
             *ytdlp_command(), *browser_args(self.settings),
-            "--flat-playlist", "--playlist-items", "1", "--dump-single-json", url,
+            "--flat-playlist", "--dump-single-json", url,
         ]
         result = self._run(command, capture=True)
         if result.returncode != 0:
@@ -170,25 +341,72 @@ class DownloadEngine:
         (task_dir / ".source-url.txt").write_text(url + "\n", encoding="utf-8")
         return task_dir
 
+    @staticmethod
+    def _info_snapshot(task_dir: Path) -> dict[Path, int]:
+        snapshot = {}
+        for path in task_dir.glob("*.info.json"):
+            try:
+                snapshot[path] = path.stat().st_mtime_ns
+            except OSError:
+                pass
+        return snapshot
+
+    def _stamp_download_task(
+        self,
+        task_dir: Path,
+        before: dict[Path, int],
+        task_id: str,
+        started_at: int,
+        batch_index: int,
+    ) -> None:
+        """Attach one-click download order to metadata written by this run."""
+        for info_path in task_dir.glob("*.info.json"):
+            try:
+                if before.get(info_path) == info_path.stat().st_mtime_ns:
+                    continue
+                data = json.loads(info_path.read_text(encoding="utf-8"))
+                item_index = _positive_int(
+                    data.get("playlist_index") or data.get("playlist_autonumber")
+                ) or 1
+                data["zzzdown"] = {
+                    "task_id": task_id,
+                    "started_at": started_at,
+                    "batch_index": batch_index,
+                    "item_index": item_index,
+                }
+                temporary = info_path.with_name(info_path.name + ".tmp")
+                temporary.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                temporary.replace(info_path)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
+                self.log(f"WARNING: Unable to record download order for {info_path.name}")
+
     def _stream(self, command: list[str]) -> int:
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        self.process = subprocess.Popen(
+        if not self._wait_until_resumed():
+            return -1
+        process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, errors="replace", bufsize=1, creationflags=flags,
+            text=True, errors="replace", bufsize=1, **self._process_options(),
         )
-        assert self.process.stdout is not None
-        for line in self.process.stdout:
-            rendered = line.rstrip()
-            if rendered.lower().startswith("error:"):
-                rendered = f"ERROR: {friendly_error(rendered)}"
-            self.log(rendered)
-        status = self.process.wait()
-        self.process = None
-        return status
+        self._set_process(process)
+        try:
+            assert process.stdout is not None
+            for line in process.stdout:
+                rendered = line.rstrip()
+                if rendered.lower().startswith("error:"):
+                    rendered = f"ERROR: {friendly_error(rendered)}"
+                self.log(rendered)
+            return process.wait()
+        finally:
+            self._clear_process(process)
 
     def download(self, urls: list[str]) -> int:
         failures = 0
         ffmpeg = ffmpeg_path()
+        task_started_at = int(time.time() * 1000)
+        task_id = f"{task_started_at}-{secrets.token_hex(4)}"
         for number, url in enumerate(urls, 1):
             if self.cancelled:
                 break
@@ -203,7 +421,11 @@ class DownloadEngine:
                     break
                 source, title = task_identity(data, url)
                 kind = task_type(url, data)
+                entries = data.get("entries") or []
+                item_total = max(1, sum(1 for entry in entries if entry))
+                self.log(f"[zzzdown-collection] {item_total}")
                 task_dir = self._task_dir(source, title, url)
+                info_before = self._info_snapshot(task_dir)
                 self.log(f"{source} · {kind} · {title}")
                 command = [
                     *ytdlp_command(), *browser_args(self.settings),
@@ -212,8 +434,12 @@ class DownloadEngine:
                     "--continue", "--ignore-errors", "--retries", "10", "--fragment-retries", "10",
                     "--concurrent-fragments", "4", "--sleep-requests", "1",
                     "--newline", "--no-colors",
+                    "--no-simulate", "--print",
+                    "video:[zzzdown-item] %(playlist_index)s|%(playlist_count)s|%(id)s|%(webpage_url)s|%(title)s",
+                    "--print", "after_video:[zzzdown-item-done] %(playlist_index)s|%(playlist_count)s|%(id)s|%(webpage_url)s|%(title)s",
+                    "--no-quiet", "--progress",
                     "--progress-template",
-                    "download:[zzzdown-progress] %(progress._percent_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(info.resolution)s|%(info.ext)s",
+                    "download:[zzzdown-progress] %(progress._percent_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(info.resolution)s|%(info.ext)s|%(info.playlist_index)s|%(info.playlist_count)s|%(info.id)s|%(info.webpage_url)s|%(info.title)s",
                     "--format", "bv*[height<=2160]+ba/b[height<=2160]/b",
                     "--format-sort", "res:2160,vcodec:h264,fps,hdr:12,quality,br",
                     "--merge-output-format", "mp4", "--remux-video", "mp4",
@@ -225,7 +451,11 @@ class DownloadEngine:
                     "--output", "%(upload_date>%Y-%m-%d,release_date>%Y-%m-%d|Unknown)s_%(title).160B [%(id)s].%(ext)s",
                     url,
                 ]
-                if self._stream(command) != 0 and not self.cancelled:
+                return_code = self._stream(command)
+                self._stamp_download_task(
+                    task_dir, info_before, task_id, task_started_at, number
+                )
+                if return_code != 0 and not self.cancelled:
                     failures += 1
                 if self.cancelled:
                     break
@@ -239,8 +469,34 @@ class DownloadEngine:
 
     def cancel(self) -> None:
         self._cancelled.set()
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
+        self._paused.clear()
+        self._pause_gate.set()
+        with self._process_lock:
+            process = self.process
+        if process:
+            self._terminate_process(process)
+
+    def pause(self) -> bool:
+        if self.cancelled:
+            return False
+        self._paused.set()
+        self._pause_gate.clear()
+        with self._process_lock:
+            process = self.process
+        if process:
+            self._suspend_process(process)
+        return True
+
+    def resume(self) -> bool:
+        if self.cancelled:
+            return False
+        with self._process_lock:
+            process = self.process
+        if process:
+            self._resume_process(process)
+        self._paused.clear()
+        self._pause_gate.set()
+        return True
 
 
 def import_library(source: Path, destination: Path, log=lambda _message: None) -> int:

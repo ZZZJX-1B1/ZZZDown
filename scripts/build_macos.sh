@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h}/.."
-version="${APP_VERSION:-0.1.3}"
+version="${APP_VERSION:-0.1.4}"
 version="${version#v}"
 product="ZZZDown-v${version}-macOS-Apple-Silicon"
 
@@ -14,7 +14,7 @@ python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements-build.txt
 python3 scripts/prepare_tools.py
 APP_VERSION="$version" PYINSTALLER_CONFIG_DIR="$PWD/.pyinstaller-cache" python3 -m PyInstaller --noconfirm --clean ZZZDown.spec
-hdiutil create -volname ZZZDown -srcfolder dist/ZZZDown.app -ov -format UDZO "dist/${product}.dmg"
+hdiutil create -volname "ZZZDown v${version}" -srcfolder dist/ZZZDown.app -size 600m -ov -format UDZO "dist/${product}.dmg"
 ditto -c -k --sequesterRsrc --keepParent dist/ZZZDown.app "dist/${product}-portable.zip"
 test -f "dist/${product}.dmg"
 test -f "dist/${product}-portable.zip"

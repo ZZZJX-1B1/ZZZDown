@@ -22,6 +22,28 @@ SERVICE_VERSION = 1
 STATE_FILENAME = ".video-library-folders.json"
 
 
+def parse_byte_range(value, size):
+    """Parse one HTTP byte range and return an inclusive (start, end) pair."""
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", str(value or "").strip())
+    if not match or size <= 0:
+        raise ValueError("Invalid byte range")
+    start_text, end_text = match.groups()
+    if not start_text and not end_text:
+        raise ValueError("Invalid byte range")
+    if not start_text:
+        length = int(end_text)
+        if length <= 0:
+            raise ValueError("Invalid byte range")
+        return max(0, size - length), size - 1
+    start = int(start_text)
+    if start >= size:
+        raise ValueError("Range starts beyond the file")
+    end = min(size - 1, int(end_text)) if end_text else size - 1
+    if end < start:
+        raise ValueError("Invalid byte range")
+    return start, end
+
+
 class LibraryHandler(SimpleHTTPRequestHandler):
     server_version = "LocalVideoLibrary/1.0"
 
@@ -44,6 +66,61 @@ class LibraryHandler(SimpleHTTPRequestHandler):
             self.send_header("Vary", "Origin")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def send_head(self):
+        path = Path(self.translate_path(self.path))
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:
+            return self.send_video_head(path)
+        return super().send_head()
+
+    def send_video_head(self, path):
+        try:
+            source = path.open("rb")
+            stat = path.stat()
+        except OSError:
+            self.send_error(404, "File not found")
+            return None
+        size = stat.st_size
+        requested = self.headers.get("Range")
+        self._byte_range = None
+        if requested:
+            try:
+                start, end = parse_byte_range(requested, size)
+            except (TypeError, ValueError):
+                source.close()
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+                return None
+            self._byte_range = (start, end)
+            source.seek(start)
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            content_length = end - start + 1
+        else:
+            self.send_response(200)
+            content_length = size
+        self.send_header("Content-Type", self.guess_type(str(path)))
+        self.send_header("Content-Length", str(content_length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Last-Modified", self.date_time_string(stat.st_mtime))
+        self.end_headers()
+        return source
+
+    def copyfile(self, source, outputfile):
+        byte_range = getattr(self, "_byte_range", None)
+        if byte_range is None:
+            super().copyfile(source, outputfile)
+            return
+        remaining = byte_range[1] - byte_range[0] + 1
+        while remaining > 0:
+            chunk = source.read(min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            outputfile.write(chunk)
+            remaining -= len(chunk)
 
     def send_json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

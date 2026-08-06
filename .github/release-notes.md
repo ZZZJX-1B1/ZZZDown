@@ -1,6 +1,16 @@
 ## English
 
-This release brings the redesigned PySide6 interface into the production ZZZDown application, with clearer download progress, task metrics, queue status, and improved cancellation behavior.
+ZZZDown v0.1.4 brings the redesigned PySide6 interface into production and adds a much more capable local download workflow.
+
+Highlights:
+
+- Redesigned bilingual Qt interface with clearer progress, task metrics, and queue status
+- Pause, resume, and responsive stop controls
+- Accurate per-video and collection progress with complete downloader logs
+- Failed-item tracking with open, copy, and copy-all-failed-link actions
+- Improved local-library playback with seeking support and browser tab reuse
+- Download-date filters, collapsible task filters, and download-task ordering
+- New light 3D application icon
 
 Downloads:
 
@@ -11,7 +21,17 @@ These public builds are unsigned. On macOS, Control-click ZZZDown and choose **O
 
 ## 中文
 
-此版本将重新设计的 PySide6 界面正式应用到 ZZZDown，提供更清晰的下载进度、任务指标和队列状态，并改进了停止下载后的取消行为。
+ZZZDown v0.1.4 将重新设计的 PySide6 界面正式应用到生产版本，并完善本地视频下载与管理流程。
+
+主要更新：
+
+- 全新中英双语 Qt 界面，下载进度、任务指标和队列状态更加清晰
+- 支持暂停、继续，以及反馈更明确的停止操作
+- 合集与单个视频进度分别计算，并保留完整下载日志
+- 标记未完成项目，支持打开、复制及批量复制失败链接
+- 改进本地视频播放、拖动定位和浏览器标签页复用
+- 增加下载日期筛选、任务筛选折叠和下载任务顺序排序
+- 使用全新的浅色立体渐变应用图标
 
 下载方式：
 

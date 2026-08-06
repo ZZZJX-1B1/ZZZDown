@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
-$version = if ($env:APP_VERSION) { $env:APP_VERSION -replace '^v', '' } else { "0.1.3" }
+$version = if ($env:APP_VERSION) { $env:APP_VERSION -replace '^v', '' } else { "0.1.4" }
 $product = "ZZZDown-v$version-Windows-x64"
 python -m pip install --upgrade pip
 python -m pip install -r requirements-build.txt

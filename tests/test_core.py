@@ -1,20 +1,35 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
+import signal
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
 from zzzdown.config import Settings
-from zzzdown.engine import DownloadEngine, friendly_error, history_args, import_library, parse_progress_line, parse_urls, safe_name, task_type
-from zzzdown.indexer import build_library_html, generate_global
+from zzzdown.engine import DownloadEngine, aggregate_progress, friendly_error, history_args, import_library, parse_item_done_line, parse_item_line, parse_progress_line, parse_urls, safe_name, task_type
+from zzzdown.indexer import build_library_html, generate_global, load_items
 
 
 class CoreTests(unittest.TestCase):
     def test_parse_urls_deduplicates_and_trims_punctuation(self):
         text = "https://example.com/a， https://example.com/a\nhttps://example.com/b)"
         self.assertEqual(parse_urls(text), ["https://example.com/a", "https://example.com/b"])
+
+    def test_parse_urls_ignores_titles_and_notes_touching_links(self):
+        text = (
+            "标题：https://www.bilibili.com/video/BV1abc（飞越上海，10458播）\n"
+            "https://example.com/watch?id=2(子链接见下级行)\n"
+            "说明 https://example.com/three，播放量 523212"
+        )
+        self.assertEqual(parse_urls(text), [
+            "https://www.bilibili.com/video/BV1abc",
+            "https://example.com/watch?id=2",
+            "https://example.com/three",
+        ])
 
     def test_structured_download_progress(self):
         progress = parse_progress_line(
@@ -24,6 +39,36 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(progress["downloaded"], "1.28GiB")
         self.assertEqual(progress["resolution"], "1920x1080")
         self.assertEqual(progress["format"], "MP4")
+
+    def test_collection_progress_tracks_all_videos(self):
+        progress = parse_progress_line(
+            "[zzzdown-progress] 50.0%|5MiB|10MiB|1MiB/s|00:05|1080p|mp4|3|10|BV123|https://bilibili.com/video/BV123|测试视频"
+        )
+        self.assertEqual(progress["item_index"], 3)
+        self.assertEqual(progress["item_total"], 10)
+        self.assertEqual(progress["video_title"], "测试视频")
+        self.assertEqual(aggregate_progress(3, 10, 50), 25)
+        self.assertEqual(aggregate_progress(3, 10, 100), 30)
+
+    def test_item_marker_keeps_pipes_in_video_title(self):
+        item = parse_item_line(
+            "[zzzdown-item] 4|12|BV456|https://bilibili.com/video/BV456|标题 | 第二部分"
+        )
+        self.assertEqual(item["item_index"], 4)
+        self.assertEqual(item["item_total"], 12)
+        self.assertEqual(item["video_title"], "标题 | 第二部分")
+        completed = parse_item_done_line(
+            "[zzzdown-item-done] 4|12|BV456|https://bilibili.com/video/BV456|标题 | 第二部分"
+        )
+        self.assertEqual(completed, item)
+
+    def test_unknown_playlist_total_is_preserved_for_metadata_fallback(self):
+        item = parse_item_line("[zzzdown-item] 2|NA|BV789|https://example.com/BV789|视频")
+        progress = parse_progress_line(
+            "[zzzdown-progress] 10%|1MiB|10MiB|1MiB/s|00:09|1080p|mp4|2|NA|BV789|https://example.com/BV789|视频"
+        )
+        self.assertEqual(item["item_total"], 0)
+        self.assertEqual(progress["item_total"], 0)
 
     def test_safe_name_removes_cross_platform_invalid_characters(self):
         self.assertEqual(safe_name(' A/B:*?"<>|  C '), "A_B_______ C")
@@ -68,6 +113,78 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(failures, 0)
         self.assertEqual(messages, ["[1/2] https://example.com/one", "Cookies: none"])
 
+    def test_download_command_keeps_full_logs_and_progress_with_item_markers(self):
+        class CommandEngine(DownloadEngine):
+            command = None
+
+            def _metadata(self, _url):
+                return {"title": "测试视频", "extractor_key": "Test"}
+
+            def _stream(self, command):
+                self.command = command
+                return 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            engine = CommandEngine(Settings(library_dir=directory, browser="none"))
+            with patch("zzzdown.engine.ffmpeg_path", return_value="ffmpeg"), patch("zzzdown.engine.generate_global"):
+                failures = engine.download(["https://example.com/video"])
+
+        self.assertEqual(failures, 0)
+        self.assertIn("--no-quiet", engine.command)
+        self.assertIn("--progress", engine.command)
+        self.assertIn("--progress-template", engine.command)
+        printed = [engine.command[index + 1] for index, value in enumerate(engine.command) if value == "--print"]
+        self.assertTrue(any("[zzzdown-item]" in value for value in printed))
+        self.assertTrue(any("[zzzdown-item-done]" in value for value in printed))
+
+    def test_download_task_order_is_written_to_new_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task = Path(directory)
+            info = task / "video.info.json"
+            info.write_text(
+                json.dumps({"id": "BV1", "playlist_index": 3}),
+                encoding="utf-8",
+            )
+            engine = DownloadEngine(Settings(browser="none"))
+
+            engine._stamp_download_task(task, {}, "task-123", 456000, 2)
+
+            metadata = json.loads(info.read_text(encoding="utf-8"))["zzzdown"]
+            self.assertEqual(metadata, {
+                "task_id": "task-123",
+                "started_at": 456000,
+                "batch_index": 2,
+                "item_index": 3,
+            })
+
+    def test_pause_resume_and_cancel_signal_the_active_process_group(self):
+        class Process:
+            pid = 4321
+
+            @staticmethod
+            def poll():
+                return None
+
+        engine = DownloadEngine(Settings(browser="none"))
+        engine.process = Process()
+        with patch("zzzdown.engine.os.getpgid", return_value=4321), patch("zzzdown.engine.os.killpg") as killpg:
+            self.assertTrue(engine.pause())
+            self.assertTrue(engine.paused)
+            killpg.assert_called_with(4321, signal.SIGSTOP)
+
+            self.assertTrue(engine.resume())
+            self.assertFalse(engine.paused)
+            killpg.assert_called_with(4321, signal.SIGCONT)
+
+            engine.pause()
+            engine.cancel()
+            self.assertTrue(engine.cancelled)
+            self.assertFalse(engine.paused)
+            self.assertEqual(killpg.call_args_list[-2:], [
+                unittest.mock.call(4321, signal.SIGCONT),
+                unittest.mock.call(4321, signal.SIGTERM),
+            ])
+
     def test_import_and_generate_empty_library(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -88,6 +205,41 @@ class CoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 import_library(source, source / "nested")
 
+    def test_library_uses_local_video_time_as_download_date(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            task = root / "Bilibili" / "测试任务"
+            task.mkdir(parents=True)
+            video = task / "示例 [BV123].mp4"
+            video.write_bytes(b"video")
+            (task / "示例 [BV123].info.json").write_text(
+                json.dumps({
+                    "id": "BV123",
+                    "title": "示例",
+                    "upload_date": "20200102",
+                    "playlist_index": 4,
+                    "zzzdown": {
+                        "task_id": "batch-1",
+                        "started_at": 111000,
+                        "batch_index": 2,
+                        "item_index": 4,
+                    },
+                }),
+                encoding="utf-8",
+            )
+            timestamp = datetime(2026, 8, 3, 12, 0).timestamp()
+            os.utime(video, (timestamp, timestamp))
+
+            items = load_items(root, include_collection=True)
+
+            self.assertEqual(items[0]["date"], "2020-01-02")
+            self.assertEqual(items[0]["downloadDate"], "2026-08-03")
+            self.assertEqual(items[0]["downloadTimestamp"], int(timestamp * 1000))
+            self.assertEqual(items[0]["downloadTaskId"], "batch-1")
+            self.assertEqual(items[0]["downloadTaskStartedTimestamp"], 111000)
+            self.assertEqual(items[0]["downloadBatchIndex"], 2)
+            self.assertEqual(items[0]["downloadItemIndex"], 4)
+
     def test_english_library_translates_filters_and_confirmation(self):
         html = build_library_html(
             "ZZZDown",
@@ -97,8 +249,37 @@ class CoreTests(unittest.TestCase):
         )
         self.assertIn("All sources", html)
         self.assertIn("Creator profile", html)
+        self.assertIn("Downloaded", html)
+        self.assertIn("All dates", html)
+        self.assertIn("Days 8–15", html)
+        self.assertIn("Days 16–30", html)
+        self.assertIn("Older", html)
+        self.assertIn("Published date", html)
+        self.assertIn("Download task order", html)
+        self.assertIn("Show all", html)
+        self.assertIn("Collapse", html)
         self.assertIn("Type CLEAR to continue", html)
         self.assertIn("confirm:'CLEAR'", html)
+
+    def test_library_contains_download_date_filter_logic(self):
+        html = build_library_html("ZZZDown", [], "token")
+        self.assertIn('id="downloadDateFilters"', html)
+        self.assertIn("function matchesDownloadDate", html)
+        self.assertIn("第 8–15 天", html)
+        self.assertIn("第 16–30 天", html)
+        self.assertIn("更早", html)
+
+    def test_library_contains_download_task_sorting(self):
+        html = build_library_html("ZZZDown", [], "token")
+        self.assertIn('id="sortOrder"', html)
+        self.assertIn("下载任务顺序", html)
+        self.assertIn("function compareDownloadTask", html)
+
+    def test_library_download_task_filters_can_collapse(self):
+        html = build_library_html("ZZZDown", [], "token")
+        self.assertIn('id="taskFilterToggle"', html)
+        self.assertIn("function updateTaskFilterCollapse", html)
+        self.assertIn("taskFiltersCollapsed:true", html)
 
 
 if __name__ == "__main__":
