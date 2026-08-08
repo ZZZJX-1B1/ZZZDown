@@ -1,6 +1,6 @@
 ## English
 
-ZZZDown v0.1.4 brings the redesigned PySide6 interface into production and adds a much more capable local download workflow.
+ZZZDown v0.1.5 is a maintenance release for the redesigned PySide6 application.
 
 Highlights:
 
@@ -11,6 +11,7 @@ Highlights:
 - Improved local-library playback with seeking support and browser tab reuse
 - Download-date filters, collapsible task filters, and download-task ordering
 - New light 3D application icon
+- Refreshes Windows Explorer icon information after installation and uses the ZZZDown icon for Setup and Uninstall
 
 Downloads:
 
@@ -21,7 +22,7 @@ These public builds are unsigned. On macOS, Control-click ZZZDown and choose **O
 
 ## 中文
 
-ZZZDown v0.1.4 将重新设计的 PySide6 界面正式应用到生产版本，并完善本地视频下载与管理流程。
+ZZZDown v0.1.5 是新版 PySide6 应用的维护修正版。
 
 主要更新：
 
@@ -32,6 +33,7 @@ ZZZDown v0.1.4 将重新设计的 PySide6 界面正式应用到生产版本，�
 - 改进本地视频播放、拖动定位和浏览器标签页复用
 - 增加下载日期筛选、任务筛选折叠和下载任务顺序排序
 - 使用全新的浅色立体渐变应用图标
+- Windows 安装完成后自动通知资源管理器刷新图标，并统一安装程序与卸载程序图标
 
 下载方式：
 

@@ -1,6 +1,6 @@
 #define MyAppName "ZZZDown"
 #ifndef MyAppVersion
-#define MyAppVersion "0.1.4"
+#define MyAppVersion "0.1.5"
 #endif
 #define MyAppExeName "ZZZDown.exe"
 
@@ -8,6 +8,8 @@
 AppId={{7FCDB1A1-B46E-4A32-B0D7-D7F4A9F6E1B4}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+SetupIconFile=..\src\zzzdown\resources\ZZZDown.ico
+ChangesAssociations=yes
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=..\dist

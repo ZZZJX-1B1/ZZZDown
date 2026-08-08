@@ -15,6 +15,11 @@ from zzzdown.indexer import build_library_html, generate_global, load_items
 
 
 class CoreTests(unittest.TestCase):
+    def test_windows_installer_refreshes_explorer_icons(self):
+        installer = (Path(__file__).resolve().parents[1] / "installer" / "ZZZDown.iss").read_text(encoding="utf-8")
+        self.assertIn("SetupIconFile=..\\src\\zzzdown\\resources\\ZZZDown.ico", installer)
+        self.assertIn("ChangesAssociations=yes", installer)
+
     def test_parse_urls_deduplicates_and_trims_punctuation(self):
         text = "https://example.com/a， https://example.com/a\nhttps://example.com/b)"
         self.assertEqual(parse_urls(text), ["https://example.com/a", "https://example.com/b"])

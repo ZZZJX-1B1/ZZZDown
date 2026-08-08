@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h}/.."
-version="${APP_VERSION:-0.1.4}"
+version="${APP_VERSION:-0.1.5}"
 version="${version#v}"
 product="ZZZDown-v${version}-macOS-Apple-Silicon"
 

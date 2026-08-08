@@ -34,7 +34,7 @@ jobs:
           cache: pip
       - name: Build Apple Silicon packages
         env:
-          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.4' }}
+          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.5' }}
         run: chmod +x scripts/build_macos.sh && scripts/build_macos.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -54,7 +54,7 @@ jobs:
       - name: Build Windows packages
         shell: powershell
         env:
-          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.4' }}
+          APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.1.5' }}
         run: scripts/build_windows.ps1
       - uses: actions/upload-artifact@v4
         with:
